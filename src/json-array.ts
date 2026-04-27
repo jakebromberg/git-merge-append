@@ -238,5 +238,7 @@ function setArray(merged: unknown, arrayPath: string | undefined, value: Entry[]
 
 function compareScalar(a: unknown, b: unknown): number {
   if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b));
+  const sa = String(a);
+  const sb = String(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
 }

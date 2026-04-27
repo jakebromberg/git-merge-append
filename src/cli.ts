@@ -9,7 +9,6 @@ export type ParsedArgs =
   | { kind: "help" }
   | { kind: "error"; message: string };
 
-const RESERVED = new Set(["install", "resolve"] as const);
 const KNOWN_DRIVER_FLAGS = new Set(["--array-path", "--key", "--sort-by"]);
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {

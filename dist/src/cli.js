@@ -2,7 +2,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { mergeJsonArray } from "./json-array.js";
-const RESERVED = new Set(["install", "resolve"]);
 const KNOWN_DRIVER_FLAGS = new Set(["--array-path", "--key", "--sort-by"]);
 export function parseArgs(argv) {
     if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {

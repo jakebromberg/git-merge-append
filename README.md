@@ -56,7 +56,7 @@ git-merge-append driver --array-path <path> --key <field> [--sort-by <field>] --
 
 Flags:
 
-- `--array-path <path>` — dotted path to the array inside the JSON document. Use `""` (or omit) when the file *is* the array at the top level.
+- `--array-path <field>` — name of the field on the document that holds the array (e.g., `entries` for Drizzle journals). Single field name only in v1; nested paths are tracked as a follow-up. Omit when the file *is* the array at the top level.
 - `--key <field>` — name of the field on each entry that uniquely identifies it (e.g., `idx` for Drizzle, `id` for translations).
 - `--sort-by <field>` — field to sort the merged array by. Defaults to `--key`.
 
