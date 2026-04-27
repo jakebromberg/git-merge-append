@@ -1,0 +1,182 @@
+// Real-git integration test. Skipped on Windows for v1: the install command's
+// shell-quoting story for `git config merge.<name>.driver` on Windows isn't
+// validated yet (tracked as issue #10).
+
+import { describe, it, expect } from "vitest";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir, platform } from "node:os";
+import { join } from "node:path";
+
+const CLI_PATH = join(__dirname, "..", "dist", "src", "cli.js");
+const isWindows = platform() === "win32";
+const skipDescribe = isWindows ? describe.skip : describe;
+
+// Provides a 'git-merge-append' binary on PATH that proxies to the built CLI.
+// This lets the install command register a driver that git can find when it
+// invokes the merge driver during git merge / git rebase.
+function setUp(): { dir: string; env: NodeJS.ProcessEnv } {
+  const dir = mkdtempSync(join(tmpdir(), "git-merge-append-it-"));
+  const binDir = join(dir, "bin");
+  spawnSync("mkdir", ["-p", binDir]);
+  const wrapperBin = join(binDir, "git-merge-append");
+  writeFileSync(wrapperBin, `#!/bin/sh\nexec node "${CLI_PATH}" "$@"\n`);
+  chmodSync(wrapperBin, 0o755);
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@example.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@example.com",
+  };
+
+  run(["init", "-q", "-b", "main", dir], { env });
+  run(["-C", dir, "config", "commit.gpgsign", "false"], { env });
+  return { dir, env };
+}
+
+function run(args: readonly string[], opts: { env: NodeJS.ProcessEnv; allowFail?: boolean } & {
+  cwd?: string;
+} = { env: process.env }): SpawnSyncReturns<string> {
+  const r = spawnSync("git", args, { encoding: "utf8", env: opts.env, cwd: opts.cwd });
+  if (!opts.allowFail && r.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed:\n${r.stderr}\n${r.stdout}`);
+  }
+  return r;
+}
+
+function wrap(entries: unknown[]): string {
+  return JSON.stringify({ version: "5", entries }, null, 2) + "\n";
+}
+
+skipDescribe("real-git integration", () => {
+  it("sanity: built CLI exists", () => {
+    expect(existsSync(CLI_PATH)).toBe(true);
+  });
+
+  it("install registers a driver that resolves concurrent appends in git merge", () => {
+    const { dir, env } = setUp();
+    const journal = "_journal.json";
+    const journalPath = join(dir, journal);
+    writeFileSync(journalPath, wrap([{ idx: 0, tag: "init" }]));
+    run(["-C", dir, "add", journal], { env });
+    run(["-C", dir, "commit", "-q", "-m", "init"], { env });
+
+    // Install the driver with a path-pattern matching the journal file.
+    const installArgs = [
+      CLI_PATH, "install",
+      "--name", "journal",
+      "--array-path", "entries",
+      "--key", "idx",
+      "--sort-by", "idx",
+      "--", journal,
+    ];
+    const installR = spawnSync(process.execPath, installArgs, {
+      cwd: dir, env, encoding: "utf8",
+    });
+    expect(installR.status, installR.stderr).toBe(0);
+    expect(readFileSync(join(dir, ".gitattributes"), "utf8")).toContain(
+      `${journal} merge=journal`,
+    );
+
+    run(["-C", dir, "add", ".gitattributes"], { env });
+    run(["-C", dir, "commit", "-q", "-m", "add gitattributes"], { env });
+
+    // Branch A: append idx=1
+    run(["-C", dir, "checkout", "-q", "-b", "branch-a"], { env });
+    writeFileSync(journalPath, wrap([{ idx: 0, tag: "init" }, { idx: 1, tag: "a" }]));
+    run(["-C", dir, "commit", "-q", "-am", "append idx=1"], { env });
+
+    // Branch B from main: append idx=2
+    run(["-C", dir, "checkout", "-q", "main"], { env });
+    run(["-C", dir, "checkout", "-q", "-b", "branch-b"], { env });
+    writeFileSync(journalPath, wrap([{ idx: 0, tag: "init" }, { idx: 2, tag: "b" }]));
+    run(["-C", dir, "commit", "-q", "-am", "append idx=2"], { env });
+
+    // Merge branch-a into branch-b — should resolve cleanly via the driver.
+    const mergeR = run(["-C", dir, "merge", "-q", "--no-edit", "branch-a"], { env, allowFail: true });
+    expect(mergeR.status, `merge failed:\n${mergeR.stderr}\n${mergeR.stdout}`).toBe(0);
+
+    const merged = JSON.parse(readFileSync(journalPath, "utf8"));
+    expect(merged.entries).toEqual([
+      { idx: 0, tag: "init" },
+      { idx: 1, tag: "a" },
+      { idx: 2, tag: "b" },
+    ]);
+  });
+
+  it("git merge surfaces a normal conflict when entries diverge on the same key", () => {
+    const { dir, env } = setUp();
+    const journal = "_journal.json";
+    const journalPath = join(dir, journal);
+    writeFileSync(journalPath, wrap([{ idx: 0 }]));
+    writeFileSync(join(dir, ".gitattributes"), `${journal} merge=journal\n`);
+    run(["-C", dir, "add", journal, ".gitattributes"], { env });
+    run(["-C", dir, "commit", "-q", "-m", "init"], { env });
+
+    const installR = spawnSync(
+      process.execPath,
+      [
+        CLI_PATH, "install",
+        "--name", "journal",
+        "--array-path", "entries",
+        "--key", "idx",
+        "--sort-by", "idx",
+        "--", journal,
+      ],
+      { cwd: dir, env, encoding: "utf8" },
+    );
+    expect(installR.status, installR.stderr).toBe(0);
+
+    run(["-C", dir, "checkout", "-q", "-b", "branch-a"], { env });
+    writeFileSync(journalPath, wrap([{ idx: 0 }, { idx: 1, tag: "a" }]));
+    run(["-C", dir, "commit", "-q", "-am", "a"], { env });
+
+    run(["-C", dir, "checkout", "-q", "main"], { env });
+    run(["-C", dir, "checkout", "-q", "-b", "branch-b"], { env });
+    writeFileSync(journalPath, wrap([{ idx: 0 }, { idx: 1, tag: "b" }]));
+    run(["-C", dir, "commit", "-q", "-am", "b"], { env });
+
+    const mergeR = run(["-C", dir, "merge", "-q", "--no-edit", "branch-a"], { env, allowFail: true });
+    expect(mergeR.status).not.toBe(0);
+  });
+
+  it("resolve recovers cleanly after a mid-merge conflict the driver was not registered for", () => {
+    const { dir, env } = setUp();
+    const journal = "_journal.json";
+    const journalPath = join(dir, journal);
+    writeFileSync(journalPath, wrap([{ idx: 0 }]));
+    run(["-C", dir, "add", journal], { env });
+    run(["-C", dir, "commit", "-q", "-m", "init"], { env });
+
+    // No driver installed.
+    run(["-C", dir, "checkout", "-q", "-b", "branch-a"], { env });
+    writeFileSync(journalPath, wrap([{ idx: 0 }, { idx: 1 }]));
+    run(["-C", dir, "commit", "-q", "-am", "a"], { env });
+    run(["-C", dir, "checkout", "-q", "main"], { env });
+    run(["-C", dir, "checkout", "-q", "-b", "branch-b"], { env });
+    writeFileSync(journalPath, wrap([{ idx: 0 }, { idx: 2 }]));
+    run(["-C", dir, "commit", "-q", "-am", "b"], { env });
+
+    const mergeR = run(["-C", dir, "merge", "-q", "--no-edit", "branch-a"], { env, allowFail: true });
+    expect(mergeR.status).not.toBe(0);
+    expect(readFileSync(journalPath, "utf8")).toMatch(/<<<<<<</);
+
+    const resolveR = spawnSync(
+      process.execPath,
+      [
+        CLI_PATH, "resolve",
+        "--array-path", "entries",
+        "--key", "idx",
+        "--sort-by", "idx",
+        "--", journal,
+      ],
+      { cwd: dir, env, encoding: "utf8" },
+    );
+    expect(resolveR.status, resolveR.stderr).toBe(0);
+    const merged = JSON.parse(readFileSync(journalPath, "utf8"));
+    expect(merged.entries.map((e: { idx: number }) => e.idx)).toEqual([0, 1, 2]);
+  });
+});
