@@ -339,4 +339,22 @@ describe("mergeJsonArray — input validation", () => {
       1, 2, 3, 5,
     ]);
   });
+
+  it("sorts string keys by code-point order, not by host locale", () => {
+    // 'Z' (0x5A) sorts before 'a' (0x61) in code-point order. Locale-aware
+    // collation (e.g., en-US) usually puts 'a' before 'Z' instead. Pin the
+    // byte-wise ordering so concurrent collaborators on different locales
+    // produce identical merged output.
+    const result = mergeJsonArray(
+      JSON.stringify({ entries: [] }, null, 2) + "\n",
+      JSON.stringify({ entries: [{ id: "Zulu" }, { id: "alpha" }] }, null, 2) + "\n",
+      JSON.stringify({ entries: [{ id: "Bravo" }, { id: "charlie" }] }, null, 2) + "\n",
+      { arrayPath: "entries", key: "id" },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(JSON.parse(result.result).entries.map((e: { id: string }) => e.id)).toEqual([
+      "Bravo", "Zulu", "alpha", "charlie",
+    ]);
+  });
 });
