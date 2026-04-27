@@ -7,8 +7,15 @@ export type ParsedArgs = {
     ours: string;
     theirs: string;
 } | {
-    kind: "reserved";
-    name: "install" | "resolve";
+    kind: "install";
+    name: string;
+    spec: MergeSpec;
+    global: boolean;
+    patterns: string[];
+} | {
+    kind: "resolve";
+    spec: MergeSpec;
+    paths: string[];
 } | {
     kind: "help";
 } | {

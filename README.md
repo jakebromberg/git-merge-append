@@ -12,7 +12,7 @@ The result is sorted by a configurable sort key. Indentation, BOM, and line-endi
 
 ## Status
 
-PR 1 ships the **core merger and `driver` subcommand**. You can register it manually via `git config` (see below). The forthcoming PR 2 adds `install` (automated `.gitattributes` + `git config` setup) and `resolve` (post-hoc rescue for mid-rebase conflicts).
+Three subcommands are wired up: `driver` (the merge driver itself), `install` (automated `.gitattributes` + `git config` setup), and `resolve` (post-hoc rescue when you forgot to install the driver before a merge).
 
 ## Install
 
@@ -28,9 +28,36 @@ You can also install directly from GitHub:
 npm install -g github:jakebromberg/git-merge-append
 ```
 
-## Manual driver registration
+## Quick start
 
 For Drizzle's `_journal.json` (the motivating example):
+
+```sh
+npx git-merge-append install \
+  --name journal \
+  --array-path entries --key idx --sort-by idx \
+  -- shared/database/src/migrations/meta/_journal.json
+```
+
+This appends a line to `.gitattributes` and registers the driver in your repo's `.git/config`. After this, `git merge` and `git rebase` will resolve concurrent appends to `_journal.json` automatically.
+
+**Per-clone caveat.** Driver definitions live in `.git/config`, which is **not** committed. Each collaborator must run `git-merge-append install` once after cloning. Add it to your project's setup script alongside `npm install`. (Tracked as issue #9 to add an `--upgrade` mode for changing existing definitions.)
+
+## Mid-rebase rescue
+
+If you didn't install the driver and you're already mid-merge with `<<<<<<<` markers in your journal, run:
+
+```sh
+npx git-merge-append resolve \
+  --array-path entries --key idx --sort-by idx \
+  -- shared/database/src/migrations/meta/_journal.json
+```
+
+`resolve` reads base/ours/theirs from git's index, runs the same merger as the driver, writes the result, and `git add`s the file. Pass no positional paths to resolve every unmerged path that matches the spec.
+
+## Manual driver registration
+
+If you'd rather not use `install`, you can wire it up by hand:
 
 **`.gitattributes`** (committed):
 
@@ -38,39 +65,49 @@ For Drizzle's `_journal.json` (the motivating example):
 shared/database/src/migrations/meta/_journal.json merge=journal
 ```
 
-**`.git/config`** (per-clone — run once after cloning):
+**`.git/config`** (per-clone):
 
 ```sh
 git config merge.journal.driver \
-  'git-merge-append driver --array-path entries --key idx --sort-by idx -- %O %A %B'
+  'git-merge-append driver --array-path entries --key idx --sort-by idx -- "%O" "%A" "%B"'
 git config merge.journal.name 'JSON keyed-array append merger'
 ```
-
-After this, `git merge` and `git rebase` will resolve concurrent appends to `_journal.json` automatically. The driver is invoked once per file per merge.
 
 ## CLI
 
 ```
-git-merge-append driver --array-path <path> --key <field> [--sort-by <field>] -- <base> <ours> <theirs>
+git-merge-append driver  --array-path <path> --key <field> [--sort-by <field>] -- <base> <ours> <theirs>
+git-merge-append install --name <name> --array-path <path> --key <field> [--sort-by <field>] [--global] -- <pattern>...
+git-merge-append resolve --array-path <path> --key <field> [--sort-by <field>] [-- <path>...]
 ```
 
-Flags:
+**Flags shared by all subcommands:**
 
-- `--array-path <field>` — name of the field on the document that holds the array (e.g., `entries` for Drizzle journals). Single field name only in v1; nested paths are tracked as a follow-up. Omit when the file *is* the array at the top level.
-- `--key <field>` — name of the field on each entry that uniquely identifies it (e.g., `idx` for Drizzle, `id` for translations).
+- `--array-path <field>` — name of the field on the document that holds the array (e.g., `entries` for Drizzle journals). Single field name only in v1; nested paths are tracked as #7. Omit when the file *is* the array at the top level.
+- `--key <field>` — name of the field on each entry that uniquely identifies it (e.g., `idx` for Drizzle, `id` for translations). Required.
 - `--sort-by <field>` — field to sort the merged array by. Defaults to `--key`.
 
-Positional arguments after `--`:
+**`driver`-specific (positional after `--`):**
 
 - `<base>` — git's `%O`, the merge ancestor.
 - `<ours>` — git's `%A`, the current branch's version. **Result is written here**, per git's contract.
 - `<theirs>` — git's `%B`, the incoming branch's version.
 
-Exit codes:
+**`install`-specific:**
 
-- `0` — clean merge.
-- `1` — algorithmic conflict (same key with divergent content, divergent top-level fields, etc.). The driver does not write to `<ours>` on conflict.
-- `2` — usage error (bad flags, malformed JSON).
+- `--name <name>` — name to register the driver under (used in `.gitattributes` and `git config`).
+- `--global` — register in `~/.gitconfig` instead of the current repo's `.git/config`.
+- Positional after `--`: one or more file path patterns (`.gitattributes`-style globs).
+
+**`resolve`-specific:**
+
+- Positional after `--`: zero or more files to resolve. With none, every unmerged path in the index is resolved.
+
+**Exit codes:**
+
+- `0` — clean merge / install succeeded / resolve cleared all conflicts.
+- `1` — algorithmic conflict.
+- `2` — usage error or invalid input.
 
 ## Algorithm
 
@@ -90,6 +127,14 @@ A real 3-way merge — no conflict-marker parsing. Given `base`, `ours`, `theirs
 8. Re-emit at base's indent and line endings.
 
 Structural equality is canonical (key-order-insensitive) — `{a: 1, b: 2}` and `{b: 2, a: 1}` are equal.
+
+## Troubleshooting
+
+**`install` fails with "merge.<name>.driver is already registered with a different value".** You changed the spec since the last `install` run. Today the safe move is `git config --unset merge.<name>.driver` and re-run `install`. An `--upgrade` flag is tracked as issue #9.
+
+**Concurrent merges still conflict on `_journal.json`.** Confirm `.git/config` actually has `merge.<name>.driver` set (`git config --get merge.journal.driver`). Driver definitions live there and aren't committed — each collaborator must run `install` once after cloning.
+
+**Driver invocation fails on Windows.** v1 only validates macOS and Ubuntu. The known footgun is `git config` argument quoting in `install.ts`. Tracked as issue #10.
 
 ## Non-goals
 
