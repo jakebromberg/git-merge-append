@@ -1,15 +1,21 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { runInstall } from "./install.js";
+import { runResolve } from "./resolve.js";
 import { mergeJsonArray, type MergeSpec } from "./json-array.js";
 
 export type ParsedArgs =
   | { kind: "driver"; spec: MergeSpec; base: string; ours: string; theirs: string }
-  | { kind: "reserved"; name: "install" | "resolve" }
+  | { kind: "install"; name: string; spec: MergeSpec; global: boolean; patterns: string[] }
+  | { kind: "resolve"; spec: MergeSpec; paths: string[] }
   | { kind: "help" }
   | { kind: "error"; message: string };
 
 const KNOWN_DRIVER_FLAGS = new Set(["--array-path", "--key", "--sort-by"]);
+const KNOWN_INSTALL_FLAGS = new Set(["--name", "--array-path", "--key", "--sort-by", "--global"]);
+const KNOWN_RESOLVE_FLAGS = new Set(["--array-path", "--key", "--sort-by"]);
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
@@ -20,8 +26,76 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   const rest = argv.slice(1);
 
   if (sub === "driver") return parseDriver(rest);
-  if (sub === "install" || sub === "resolve") return { kind: "reserved", name: sub };
+  if (sub === "install") return parseInstall(rest);
+  if (sub === "resolve") return parseResolve(rest);
   return { kind: "error", message: `unknown subcommand: ${sub}` };
+}
+
+function parseResolve(argv: readonly string[]): ParsedArgs {
+  let i = 0;
+  let arrayPath: string | undefined;
+  let key: string | undefined;
+  let sortBy: string | undefined;
+
+  while (i < argv.length && argv[i] !== "--") {
+    const flag = argv[i]!;
+    if (!KNOWN_RESOLVE_FLAGS.has(flag)) {
+      return { kind: "error", message: `unknown flag: ${flag}` };
+    }
+    const v = argv[i + 1];
+    if (v === undefined) return { kind: "error", message: `flag ${flag} requires a value` };
+    if (flag === "--array-path") arrayPath = v;
+    else if (flag === "--key") key = v;
+    else if (flag === "--sort-by") sortBy = v;
+    i += 2;
+  }
+
+  if (key === undefined) return { kind: "error", message: "missing required flag: --key" };
+
+  const paths = argv[i] === "--" ? argv.slice(i + 1) : [];
+  return { kind: "resolve", spec: { arrayPath, key, sortBy }, paths: [...paths] };
+}
+
+function parseInstall(argv: readonly string[]): ParsedArgs {
+  let i = 0;
+  let name: string | undefined;
+  let arrayPath: string | undefined;
+  let key: string | undefined;
+  let sortBy: string | undefined;
+  let global = false;
+
+  while (i < argv.length && argv[i] !== "--") {
+    const flag = argv[i]!;
+    if (!KNOWN_INSTALL_FLAGS.has(flag)) {
+      return { kind: "error", message: `unknown flag: ${flag}` };
+    }
+    if (flag === "--global") {
+      global = true;
+      i += 1;
+      continue;
+    }
+    const v = argv[i + 1];
+    if (v === undefined) {
+      return { kind: "error", message: `flag ${flag} requires a value` };
+    }
+    if (flag === "--name") name = v;
+    else if (flag === "--array-path") arrayPath = v;
+    else if (flag === "--key") key = v;
+    else if (flag === "--sort-by") sortBy = v;
+    i += 2;
+  }
+
+  if (name === undefined) return { kind: "error", message: "missing required flag: --name" };
+  if (key === undefined) return { kind: "error", message: "missing required flag: --key" };
+  if (argv[i] !== "--") {
+    return { kind: "error", message: "expected -- separator before <path-pattern>..." };
+  }
+  const patterns = argv.slice(i + 1);
+  if (patterns.length === 0) {
+    return { kind: "error", message: "expected at least one path pattern after --" };
+  }
+
+  return { kind: "install", name, spec: { arrayPath, key, sortBy }, global, patterns: [...patterns] };
 }
 
 function parseDriver(argv: readonly string[]): ParsedArgs {
@@ -84,11 +158,11 @@ export function runCli(parsed: ParsedArgs, deps: CliDeps): number {
     deps.err(HELP_TEXT);
     return 2;
   }
-  if (parsed.kind === "reserved") {
-    deps.err(
-      `error: subcommand "${parsed.name}" is reserved but not yet implemented in this version`,
-    );
-    return 2;
+  if (parsed.kind === "install") {
+    return runInstall(parsed, makeInstallDeps(deps), deps.err);
+  }
+  if (parsed.kind === "resolve") {
+    return runResolve(parsed, makeResolveDeps(deps), deps.log, deps.err);
   }
 
   let baseText: string;
@@ -129,6 +203,7 @@ const HELP_TEXT = `git-merge-append — 3-way git merge driver for keyed JSON ar
 
 Usage:
   git-merge-append driver --array-path <path> --key <field> [--sort-by <field>] -- <base> <ours> <theirs>
+  git-merge-append install --name <name> --array-path <path> --key <field> [--sort-by <field>] [--global] -- <pattern>...
   git-merge-append --help
 
 Flags (driver):
@@ -136,19 +211,68 @@ Flags (driver):
   --key <field>         field that uniquely identifies an entry (required)
   --sort-by <field>     field to sort the merged array by (defaults to --key)
 
-Positional (after --):
+Flags (install):
+  --name <name>         driver name to register (used in .gitattributes and git config)
+  --global              register the driver in your global git config
+  Plus the driver flags above; they describe the spec the registered driver will use.
+
+Positional (driver, after --):
   <base>      git's %O (merge ancestor)
   <ours>      git's %A (current branch); the merged result is written here
   <theirs>    git's %B (incoming branch)
 
 Exit codes:
-  0  clean merge
+  0  clean merge / install succeeded
   1  algorithmic conflict
   2  usage error or invalid input
-
-Reserved subcommands (not yet implemented in this version):
-  install, resolve
 `;
+
+function makeInstallDeps(deps: CliDeps) {
+  return {
+    readGitattributes: () => (existsSync(".gitattributes") ? deps.readFile(".gitattributes") : null),
+    writeGitattributes: (c: string) => deps.writeFile(".gitattributes", c),
+    runGit: (args: readonly string[]) => {
+      try {
+        const stdout = execFileSync("git", [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+        return { stdout, status: 0 };
+      } catch (e) {
+        return { stdout: "", status: (e as { status?: number }).status ?? 1 };
+      }
+    },
+  };
+}
+
+function makeResolveDeps(deps: CliDeps) {
+  return {
+    lsUnmergedFiles: () => {
+      try {
+        const stdout = execFileSync("git", ["ls-files", "-u", "-z"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+        const seen = new Set<string>();
+        for (const rec of stdout.split("\0")) {
+          if (!rec) continue;
+          const tab = rec.indexOf("\t");
+          if (tab === -1) continue;
+          seen.add(rec.slice(tab + 1));
+        }
+        return [...seen];
+      } catch {
+        return [];
+      }
+    },
+    showStage: (stage: 1 | 2 | 3, path: string) =>
+      execFileSync("git", ["show", `:${stage}:${path}`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }),
+    writeFile: (p: string, c: string) => deps.writeFile(p, c),
+    addFile: (p: string) => {
+      execFileSync("git", ["add", p], { stdio: "ignore" });
+    },
+  };
+}
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const code = runCli(parseArgs(process.argv.slice(2)), {

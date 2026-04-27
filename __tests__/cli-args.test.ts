@@ -95,15 +95,6 @@ describe("parseArgs — driver subcommand", () => {
   });
 });
 
-describe("parseArgs — reserved subcommands", () => {
-  it.each(["install", "resolve"] as const)(
-    "%s is recognized but reports not-yet-implemented",
-    (name) => {
-      const parsed = parseArgs([name]);
-      expect(parsed).toEqual({ kind: "reserved", name });
-    },
-  );
-});
 
 describe("parseArgs — help and errors", () => {
   it("--help returns help kind", () => {
