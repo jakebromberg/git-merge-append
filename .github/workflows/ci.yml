@@ -7,11 +7,21 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure git (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.symlinks false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -28,6 +38,7 @@ jobs:
         run: npm test
 
       - name: Verify committed dist is up to date
+        if: runner.os == 'Linux'
         run: |
           npm run build
           git diff --exit-code dist/ \
