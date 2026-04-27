@@ -137,7 +137,7 @@ Structural equality is canonical (key-order-insensitive) — `{a: 1, b: 2}` and 
 
 **Concurrent merges still conflict on `_journal.json`.** Confirm `.git/config` actually has `merge.<name>.driver` set (`git config --get merge.journal.driver`). Driver definitions live there and aren't committed — each collaborator must run `install` once after cloning.
 
-**Driver invocation fails on Windows.** Confirm `git-merge-append` resolves on the shell git invokes for merge drivers. On Windows that's Git for Windows' bundled MSYS `sh`; running `which git-merge-append` from Git Bash should print the npm-installed wrapper. If it doesn't, your `npm bin -g` directory isn't on the PATH that Git Bash sees.
+**Driver invocation fails on Windows.** Confirm `git-merge-append` resolves on the shell git invokes for merge drivers. On Windows that's Git for Windows' bundled MSYS `sh`; running `command -v git-merge-append` from Git Bash should print the npm-installed wrapper. If it doesn't, your `npm bin -g` directory isn't on the PATH that Git Bash sees.
 
 ## Non-goals
 
