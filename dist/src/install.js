@@ -7,17 +7,26 @@ export function runInstall(args, deps, err) {
         deps.writeGitattributes(updated);
     const driverKey = `merge.${args.name}.driver`;
     const nameKey = `merge.${args.name}.name`;
-    const existingDriver = configGet(deps.runGit, driverKey, args.global);
-    if (existingDriver !== null && existingDriver.trim() !== driver) {
+    const rawExisting = configGet(deps.runGit, driverKey, args.global);
+    const existingDriver = rawExisting === null ? null : rawExisting.trim();
+    const divergent = existingDriver !== null && existingDriver !== driver;
+    if (divergent && !args.upgrade) {
         err(`${driverKey} is already registered with a different value. ` +
-            `Run 'git config ${args.global ? "--global " : ""}--unset ${driverKey}' first, ` +
-            `or wait for the upgrade flag (tracked as issue #9).`);
-        err(`  existing: ${existingDriver.trim()}`);
+            `Re-run with --upgrade to replace it, or run ` +
+            `'git config ${args.global ? "--global " : ""}--unset ${driverKey}' to clear it manually.`);
+        err(`  existing: ${existingDriver}`);
         err(`  requested: ${driver}`);
         return 2;
     }
-    if (existingDriver === null)
+    if (divergent) {
+        err(`- ${existingDriver}`);
+        err(`+ ${driver}`);
+        configUnset(deps.runGit, driverKey, args.global);
         configSet(deps.runGit, driverKey, driver, args.global);
+    }
+    else if (existingDriver === null) {
+        configSet(deps.runGit, driverKey, driver, args.global);
+    }
     configSet(deps.runGit, nameKey, description, args.global);
     return 0;
 }
@@ -47,15 +56,19 @@ function upsertAttributesLines(existing, patterns, name) {
         return existing;
     return body.join("\n") + "\n";
 }
+function buildConfigArgs(global, ...rest) {
+    return global ? ["config", "--global", ...rest] : ["config", ...rest];
+}
 function configGet(runGit, key, global) {
-    const args = global ? ["config", "--global", "--get", key] : ["config", "--get", key];
-    const r = runGit(args);
+    const r = runGit(buildConfigArgs(global, "--get", key));
     if (r.status !== 0)
         return null;
     return r.stdout;
 }
 function configSet(runGit, key, value, global) {
-    const args = global ? ["config", "--global", key, value] : ["config", key, value];
-    runGit(args);
+    runGit(buildConfigArgs(global, key, value));
+}
+function configUnset(runGit, key, global) {
+    runGit(buildConfigArgs(global, "--unset", key));
 }
 //# sourceMappingURL=install.js.map

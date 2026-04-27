@@ -41,7 +41,7 @@ npx git-merge-append install \
 
 This appends a line to `.gitattributes` and registers the driver in your repo's `.git/config`. After this, `git merge` and `git rebase` will resolve concurrent appends to `_journal.json` automatically.
 
-**Per-clone caveat.** Driver definitions live in `.git/config`, which is **not** committed. Each collaborator must run `git-merge-append install` once after cloning. Add it to your project's setup script alongside `npm install`. (Tracked as issue #9 to add an `--upgrade` mode for changing existing definitions.)
+**Per-clone caveat.** Driver definitions live in `.git/config`, which is **not** committed. Each collaborator must run `git-merge-append install` once after cloning. Add it to your project's setup script alongside `npm install`. If the spec changes later (e.g., a new `--sort-by`), re-run with `--upgrade` to rewrite the existing driver value.
 
 ## Mid-rebase rescue
 
@@ -79,7 +79,7 @@ The double-quotes around `%O`, `%A`, `%B` are deliberate: git substitutes those 
 
 ```
 git-merge-append driver  --array-path <path> --key <field> [--sort-by <field>] -- <base> <ours> <theirs>
-git-merge-append install --name <name> --array-path <path> --key <field> [--sort-by <field>] [--global] -- <pattern>...
+git-merge-append install --name <name> --array-path <path> --key <field> [--sort-by <field>] [--global] [--upgrade] -- <pattern>...
 git-merge-append resolve --array-path <path> --key <field> [--sort-by <field>] [-- <path>...]
 ```
 
@@ -99,6 +99,7 @@ git-merge-append resolve --array-path <path> --key <field> [--sort-by <field>] [
 
 - `--name <name>` — name to register the driver under (used in `.gitattributes` and `git config`).
 - `--global` — register in `~/.gitconfig` instead of the current repo's `.git/config`.
+- `--upgrade` — replace an existing `merge.<name>.driver` whose value differs from what `install` would write. Without `--upgrade`, `install` errors when it would otherwise overwrite. No-op when the existing value already matches.
 - Positional after `--`: one or more file path patterns (`.gitattributes`-style globs).
 
 **`resolve`-specific:**
@@ -132,7 +133,7 @@ Structural equality is canonical (key-order-insensitive) — `{a: 1, b: 2}` and 
 
 ## Troubleshooting
 
-**`install` fails with "merge.<name>.driver is already registered with a different value".** You changed the spec since the last `install` run. Today the safe move is `git config --unset merge.<name>.driver` and re-run `install`. An `--upgrade` flag is tracked as issue #9.
+**`install` fails with "merge.<name>.driver is already registered with a different value".** You changed the spec since the last `install` run. Re-run `install` with `--upgrade` to replace the existing value; the old and new driver strings are printed on stderr as a `-/+` diff. (As a manual fallback, `git config --unset merge.<name>.driver` and re-run `install` without the flag.)
 
 **Concurrent merges still conflict on `_journal.json`.** Confirm `.git/config` actually has `merge.<name>.driver` set (`git config --get merge.journal.driver`). Driver definitions live there and aren't committed — each collaborator must run `install` once after cloning.
 

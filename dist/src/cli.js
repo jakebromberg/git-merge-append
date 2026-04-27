@@ -6,7 +6,7 @@ import { runInstall } from "./install.js";
 import { runResolve } from "./resolve.js";
 import { mergeJsonArray } from "./json-array.js";
 const KNOWN_DRIVER_FLAGS = new Set(["--array-path", "--key", "--sort-by"]);
-const KNOWN_INSTALL_FLAGS = new Set(["--name", "--array-path", "--key", "--sort-by", "--global"]);
+const KNOWN_INSTALL_FLAGS = new Set(["--name", "--array-path", "--key", "--sort-by", "--global", "--upgrade"]);
 const KNOWN_RESOLVE_FLAGS = new Set(["--array-path", "--key", "--sort-by"]);
 export function parseArgs(argv) {
     if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
@@ -55,6 +55,7 @@ function parseInstall(argv) {
     let key;
     let sortBy;
     let global = false;
+    let upgrade = false;
     while (i < argv.length && argv[i] !== "--") {
         const flag = argv[i];
         if (!KNOWN_INSTALL_FLAGS.has(flag)) {
@@ -62,6 +63,11 @@ function parseInstall(argv) {
         }
         if (flag === "--global") {
             global = true;
+            i += 1;
+            continue;
+        }
+        if (flag === "--upgrade") {
+            upgrade = true;
             i += 1;
             continue;
         }
@@ -90,7 +96,7 @@ function parseInstall(argv) {
     if (patterns.length === 0) {
         return { kind: "error", message: "expected at least one path pattern after --" };
     }
-    return { kind: "install", name, spec: { arrayPath, key, sortBy }, global, patterns: [...patterns] };
+    return { kind: "install", name, spec: { arrayPath, key, sortBy }, global, upgrade, patterns: [...patterns] };
 }
 function parseDriver(argv) {
     let i = 0;
@@ -187,7 +193,7 @@ const HELP_TEXT = `git-merge-append — 3-way git merge driver for keyed JSON ar
 
 Usage:
   git-merge-append driver --array-path <path> --key <field> [--sort-by <field>] -- <base> <ours> <theirs>
-  git-merge-append install --name <name> --array-path <path> --key <field> [--sort-by <field>] [--global] -- <pattern>...
+  git-merge-append install --name <name> --array-path <path> --key <field> [--sort-by <field>] [--global] [--upgrade] -- <pattern>...
   git-merge-append --help
 
 Flags (driver):
@@ -198,6 +204,7 @@ Flags (driver):
 Flags (install):
   --name <name>         driver name to register (used in .gitattributes and git config)
   --global              register the driver in your global git config
+  --upgrade             replace an existing differing driver value (no-op when it already matches)
   Plus the driver flags above; they describe the spec the registered driver will use.
 
 Positional (driver, after --):
