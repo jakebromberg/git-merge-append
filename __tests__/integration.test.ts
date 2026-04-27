@@ -134,12 +134,16 @@ describe("real-git integration", () => {
     ]);
   });
 
-  // The Windows footgun is `git config merge.<name>.driver` quoting once a
-  // path with a space gets involved. Here we drop the repo into a tmp dir
-  // whose name contains a space — that affects $PATH lookup for the wrapper
-  // script and the absolute CLI path string the driver invocation eventually
-  // expands to. If the driver string round-trips correctly through git config
-  // and sh, the merge below resolves cleanly.
+  // The Windows footgun is paths with spaces interacting with the shell git
+  // uses to invoke merge drivers. Dropping the repo into a tmp dir whose name
+  // contains a space exercises two failure modes specifically: (a) PATH
+  // lookup of the `git-merge-append` shim from MSYS sh when binDir's parent
+  // contains a space, and (b) git substituting %O/%A/%B with paths under the
+  // spaced working tree, which sh re-interprets through the double-quoted
+  // placeholders in the persisted driver string. The driver string itself is
+  // path-independent (no cwd-derived bytes), so storage round-tripping isn't
+  // what's under test here — that would require a flag value containing a
+  // space, which is a worthwhile follow-up but outside this fixture's scope.
   it("handles a working tree path that contains a space", () => {
     const { dir, env } = setUp({ dirSuffix: "git-merge-append it " });
     const journal = "_journal.json";

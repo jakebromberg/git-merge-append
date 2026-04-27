@@ -1,9 +1,12 @@
-# Keep committed JS/TS at LF on disk regardless of platform autocrlf settings.
-# The shebang in dist/src/cli.js must stay LF — Node on Linux/macOS won't
-# parse "#!/usr/bin/env node\r" correctly, so a Windows checkout that
-# normalized to CRLF and was then published would break the published binary.
-*.js text eol=lf
-*.ts text eol=lf
-*.json text eol=lf
-*.md text eol=lf
-*.yml text eol=lf
+# Pin published-binary and shell-script line endings to LF on disk regardless
+# of platform autocrlf settings. The shebang in dist/src/cli.js must stay LF
+# — Node on Linux/macOS won't parse "#!/usr/bin/env node\r", so a Windows
+# checkout that normalized to CRLF and was then published would break the
+# published binary. Same reasoning applies pre-emptively to any future shell
+# scripts we ship.
+#
+# Other text formats (test fixtures, JSON, docs) are intentionally left to
+# git's default behavior so a contributor can commit a CRLF fixture without
+# having it silently normalized.
+dist/**/*.js text eol=lf
+*.sh text eol=lf
