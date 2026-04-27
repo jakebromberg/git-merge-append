@@ -82,12 +82,16 @@ describe("CLI binary (built dist/src/cli.js)", () => {
     expect(r.stderr).toMatch(/bogus/);
   });
 
-  it("exits 2 for reserved subcommands", () => {
-    for (const sub of ["install", "resolve"]) {
-      const r = spawnSync(process.execPath, [CLI_PATH, sub], { encoding: "utf8" });
-      expect(r.status).toBe(2);
-      expect(r.stderr).toMatch(/not yet implemented/);
-    }
+  it("install with no args produces a usage error and exits 2", () => {
+    const r = spawnSync(process.execPath, [CLI_PATH, "install"], { encoding: "utf8" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/--name/);
+  });
+
+  it("resolve with no args produces a usage error and exits 2", () => {
+    const r = spawnSync(process.execPath, [CLI_PATH, "resolve"], { encoding: "utf8" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/--key/);
   });
 
   it("--help prints usage and exits 0", () => {

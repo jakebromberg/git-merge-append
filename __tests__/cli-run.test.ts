@@ -87,18 +87,11 @@ describe("runCli — driver", () => {
 });
 
 describe("runCli — reserved and help", () => {
-  it("install reports not-yet-implemented and exits 2", () => {
+  it("install with no args returns a usage error (exits 2)", () => {
     const { deps, errs } = makeDeps({});
     const code = runCli(parseArgs(["install"]), deps);
     expect(code).toBe(2);
-    expect(errs.some((e) => /not yet implemented/.test(e))).toBe(true);
-  });
-
-  it("resolve reports not-yet-implemented and exits 2", () => {
-    const { deps, errs } = makeDeps({});
-    const code = runCli(parseArgs(["resolve"]), deps);
-    expect(code).toBe(2);
-    expect(errs.some((e) => /not yet implemented/.test(e))).toBe(true);
+    expect(errs.some((e) => /--name/.test(e))).toBe(true);
   });
 
   it("--help exits 0 and prints help", () => {
