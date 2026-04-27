@@ -73,6 +73,8 @@ git config merge.journal.driver \
 git config merge.journal.name 'JSON keyed-array append merger'
 ```
 
+The double-quotes around `%O`, `%A`, `%B` are deliberate: git substitutes those placeholders with paths to its temporary blobs, and on Windows those paths can contain spaces (e.g., when the repo lives under `C:\Users\Some Name\...`). Git invokes the driver string through `/bin/sh` on Unix and through Git for Windows' bundled MSYS `sh` on Windows, so POSIX double-quote semantics apply on both platforms — no additional escaping is needed.
+
 ## CLI
 
 ```
@@ -134,7 +136,7 @@ Structural equality is canonical (key-order-insensitive) — `{a: 1, b: 2}` and 
 
 **Concurrent merges still conflict on `_journal.json`.** Confirm `.git/config` actually has `merge.<name>.driver` set (`git config --get merge.journal.driver`). Driver definitions live there and aren't committed — each collaborator must run `install` once after cloning.
 
-**Driver invocation fails on Windows.** v1 only validates macOS and Ubuntu. The known footgun is `git config` argument quoting in `install.ts`. Tracked as issue #10.
+**Driver invocation fails on Windows.** Confirm `git-merge-append` resolves on the shell git invokes for merge drivers. On Windows that's Git for Windows' bundled MSYS `sh`; running `which git-merge-append` from Git Bash should print the npm-installed wrapper. If it doesn't, your `npm bin -g` directory isn't on the PATH that Git Bash sees.
 
 ## Non-goals
 
