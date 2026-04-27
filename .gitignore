@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Coverage
+coverage
+.nyc_output
+
+# Editor
+.vscode/
+.idea/
+
+# Output of npm pack
+*.tgz
+
+# dist - not ignored: committed for GitHub-based installs

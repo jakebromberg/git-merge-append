@@ -1,0 +1,50 @@
+{
+  "name": "git-merge-append",
+  "version": "0.1.0",
+  "description": "3-way git merge driver for JSON files that are arrays of keyed entries (Drizzle journals, i18n catalogs, feature-flag manifests)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "bin": {
+    "git-merge-append": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "git",
+    "merge-driver",
+    "json",
+    "drizzle",
+    "migrations",
+    "journal",
+    "i18n",
+    "feature-flags"
+  ],
+  "author": "Jake Bromberg",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakebromberg/git-merge-append.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jakebromberg/git-merge-append/issues"
+  },
+  "homepage": "https://github.com/jakebromberg/git-merge-append#readme",
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7",
+    "vitest": "^3"
+  }
+}
