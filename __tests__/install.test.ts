@@ -69,6 +69,7 @@ describe("parseArgs — install subcommand", () => {
       name: "journal",
       spec: { arrayPath: "entries", key: "idx", sortBy: "idx" },
       global: false,
+      upgrade: false,
       patterns: ["shared/database/src/migrations/meta/_journal.json"],
     });
   });
@@ -84,6 +85,41 @@ describe("parseArgs — install subcommand", () => {
     expect(parsed.kind).toBe("install");
     if (parsed.kind !== "install") return;
     expect(parsed.global).toBe(true);
+  });
+
+  it("parses --upgrade as a boolean flag", () => {
+    const parsed = parseArgs([
+      "install",
+      "--name", "journal",
+      "--key", "idx",
+      "--upgrade",
+      "--", "**/*.json",
+    ]);
+    expect(parsed.kind).toBe("install");
+    if (parsed.kind !== "install") return;
+    expect(parsed.upgrade).toBe(true);
+  });
+
+  it("defaults upgrade to false when --upgrade is absent", () => {
+    const parsed = parseArgs(installArgs);
+    expect(parsed.kind).toBe("install");
+    if (parsed.kind !== "install") return;
+    expect(parsed.upgrade).toBe(false);
+  });
+
+  it("composes --upgrade with --global", () => {
+    const parsed = parseArgs([
+      "install",
+      "--name", "journal",
+      "--key", "idx",
+      "--global",
+      "--upgrade",
+      "--", "**/*.json",
+    ]);
+    expect(parsed.kind).toBe("install");
+    if (parsed.kind !== "install") return;
+    expect(parsed.global).toBe(true);
+    expect(parsed.upgrade).toBe(true);
   });
 
   it("errors when --name is missing", () => {
@@ -178,7 +214,110 @@ describe("runInstall", () => {
     const errs: string[] = [];
     const code = runInstall(parseArgs(installArgs) as never, deps, (m) => errs.push(m));
     expect(code).toBe(2);
-    expect(errs.join("\n")).toMatch(/already registered/i);
+    const joined = errs.join("\n");
+    expect(joined).toMatch(/already registered/i);
+    expect(joined).toMatch(/--upgrade/);
+  });
+
+  it("with --upgrade, unsets and re-sets a divergent driver in order", () => {
+    const upgradeArgs = [...installArgs.slice(0, -2), "--upgrade", ...installArgs.slice(-2)];
+    const { deps, calls } = makeDeps({
+      configValues: {
+        "merge.journal.driver": "some-other-tool --weird-flags",
+      },
+    });
+    const code = runInstall(parseArgs(upgradeArgs) as never, deps, () => {});
+    expect(code).toBe(0);
+    const driverOps = calls.filter(
+      (c) => c.args[0] === "config" && c.args.includes("merge.journal.driver"),
+    );
+    // get, unset, set — in that order.
+    expect(driverOps.map((c) => c.args.slice(0, 3))).toEqual([
+      ["config", "--get", "merge.journal.driver"],
+      ["config", "--unset", "merge.journal.driver"],
+      ["config", "merge.journal.driver", expect.stringContaining("git-merge-append driver")],
+    ]);
+  });
+
+  it("with --upgrade, prints a -/+ diff of the change to stderr", () => {
+    const upgradeArgs = [...installArgs.slice(0, -2), "--upgrade", ...installArgs.slice(-2)];
+    const { deps } = makeDeps({
+      configValues: {
+        "merge.journal.driver": "some-other-tool --weird-flags",
+      },
+    });
+    const errs: string[] = [];
+    const code = runInstall(parseArgs(upgradeArgs) as never, deps, (m) => errs.push(m));
+    expect(code).toBe(0);
+    const joined = errs.join("\n");
+    expect(joined).toMatch(/^- some-other-tool --weird-flags$/m);
+    expect(joined).toMatch(/^\+ git-merge-append driver .* -- "%O" "%A" "%B"$/m);
+  });
+
+  it("with --upgrade, is a no-op on the driver key when the existing value already matches", () => {
+    const expectedDriver =
+      "git-merge-append driver --array-path entries --key idx --sort-by idx -- " +
+      '"%O" "%A" "%B"';
+    const upgradeArgs = [...installArgs.slice(0, -2), "--upgrade", ...installArgs.slice(-2)];
+    const { deps, calls } = makeDeps({
+      configValues: {
+        "merge.journal.driver": expectedDriver,
+      },
+    });
+    const code = runInstall(parseArgs(upgradeArgs) as never, deps, () => {});
+    expect(code).toBe(0);
+    const driverWrites = calls.filter(
+      (c) =>
+        c.args[0] === "config" &&
+        c.args.includes("merge.journal.driver") &&
+        (c.args.includes("--unset") || c.args.length > 3),
+    );
+    expect(driverWrites).toEqual([]);
+  });
+
+  it("with --upgrade, behaves like a normal install when no driver is registered yet", () => {
+    const upgradeArgs = [...installArgs.slice(0, -2), "--upgrade", ...installArgs.slice(-2)];
+    const { deps, calls } = makeDeps();
+    const code = runInstall(parseArgs(upgradeArgs) as never, deps, () => {});
+    expect(code).toBe(0);
+    const unsetCalls = calls.filter(
+      (c) => c.args[0] === "config" && c.args.includes("--unset"),
+    );
+    expect(unsetCalls).toEqual([]);
+    const driverSet = calls.find(
+      (c) =>
+        c.args[0] === "config" &&
+        c.args.includes("merge.journal.driver") &&
+        !c.args.includes("--get") &&
+        !c.args.includes("--unset"),
+    );
+    expect(driverSet).toBeDefined();
+  });
+
+  it("with --upgrade --global, the unset carries --global", () => {
+    const { deps, calls } = makeDeps({
+      configValues: {
+        "global:merge.j.driver": "some-other-tool --weird-flags",
+      },
+    });
+    const code = runInstall(
+      parseArgs([
+        "install",
+        "--name", "j",
+        "--key", "idx",
+        "--global",
+        "--upgrade",
+        "--", "x.json",
+      ]) as never,
+      deps,
+      () => {},
+    );
+    expect(code).toBe(0);
+    const unsetCall = calls.find(
+      (c) => c.args[0] === "config" && c.args.includes("--unset"),
+    );
+    expect(unsetCall).toBeDefined();
+    expect(unsetCall!.args[1]).toBe("--global");
   });
 
   it("is idempotent on git config when the existing driver string already matches", () => {

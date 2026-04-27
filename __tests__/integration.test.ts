@@ -134,6 +134,59 @@ describe("real-git integration", () => {
     ]);
   });
 
+  it("install --upgrade rewrites a divergent driver in the real git config", () => {
+    const { dir, env } = setUp();
+    const journal = "_journal.json";
+
+    const installArgs = (...extra: string[]) => [
+      CLI_PATH, "install",
+      "--name", "journal",
+      "--array-path", "entries",
+      "--key", "idx",
+      ...extra,
+      "--", journal,
+    ];
+
+    const first = spawnSync(
+      process.execPath,
+      installArgs("--sort-by", "idx"),
+      { cwd: dir, env, encoding: "utf8" },
+    );
+    expect(first.status, first.stderr).toBe(0);
+
+    // Re-running with a changed spec and no --upgrade must error with exit 2.
+    const second = spawnSync(
+      process.execPath,
+      installArgs("--sort-by", "when"),
+      { cwd: dir, env, encoding: "utf8" },
+    );
+    expect(second.status).toBe(2);
+    expect(second.stderr).toMatch(/--upgrade/);
+
+    const before = run(
+      ["-C", dir, "config", "--get", "merge.journal.driver"],
+      { env },
+    ).stdout.trim();
+    expect(before).toContain("--sort-by idx");
+
+    // With --upgrade, the value is replaced and the diff is reported on stderr.
+    const third = spawnSync(
+      process.execPath,
+      installArgs("--sort-by", "when", "--upgrade"),
+      { cwd: dir, env, encoding: "utf8" },
+    );
+    expect(third.status, third.stderr).toBe(0);
+    expect(third.stderr).toMatch(/^- .*--sort-by idx/m);
+    expect(third.stderr).toMatch(/^\+ .*--sort-by when/m);
+
+    const after = run(
+      ["-C", dir, "config", "--get", "merge.journal.driver"],
+      { env },
+    ).stdout.trim();
+    expect(after).toContain("--sort-by when");
+    expect(after).not.toContain("--sort-by idx");
+  });
+
   // The Windows footgun is paths with spaces interacting with the shell git
   // uses to invoke merge drivers. Dropping the repo into a tmp dir whose name
   // contains a space exercises two failure modes specifically: (a) PATH

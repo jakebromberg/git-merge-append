@@ -11,6 +11,7 @@ export type ParsedArgs = {
     name: string;
     spec: MergeSpec;
     global: boolean;
+    upgrade: boolean;
     patterns: string[];
 } | {
     kind: "resolve";

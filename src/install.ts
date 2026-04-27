@@ -10,6 +10,7 @@ type InstallArgs = {
   name: string;
   spec: MergeSpec;
   global: boolean;
+  upgrade: boolean;
   patterns: string[];
 };
 
@@ -28,19 +29,29 @@ export function runInstall(
   const driverKey = `merge.${args.name}.driver`;
   const nameKey = `merge.${args.name}.name`;
 
-  const existingDriver = configGet(deps.runGit, driverKey, args.global);
-  if (existingDriver !== null && existingDriver.trim() !== driver) {
+  const rawExisting = configGet(deps.runGit, driverKey, args.global);
+  const existingDriver = rawExisting === null ? null : rawExisting.trim();
+  const divergent = existingDriver !== null && existingDriver !== driver;
+
+  if (divergent && !args.upgrade) {
     err(
       `${driverKey} is already registered with a different value. ` +
-        `Run 'git config ${args.global ? "--global " : ""}--unset ${driverKey}' first, ` +
-        `or wait for the upgrade flag (tracked as issue #9).`,
+        `Re-run with --upgrade to replace it, or run ` +
+        `'git config ${args.global ? "--global " : ""}--unset ${driverKey}' to clear it manually.`,
     );
-    err(`  existing: ${existingDriver.trim()}`);
+    err(`  existing: ${existingDriver}`);
     err(`  requested: ${driver}`);
     return 2;
   }
 
-  if (existingDriver === null) configSet(deps.runGit, driverKey, driver, args.global);
+  if (divergent) {
+    err(`- ${existingDriver}`);
+    err(`+ ${driver}`);
+    configUnset(deps.runGit, driverKey, args.global);
+    configSet(deps.runGit, driverKey, driver, args.global);
+  } else if (existingDriver === null) {
+    configSet(deps.runGit, driverKey, driver, args.global);
+  }
   configSet(deps.runGit, nameKey, description, args.global);
 
   return 0;
@@ -75,13 +86,16 @@ function upsertAttributesLines(
   return body.join("\n") + "\n";
 }
 
+function buildConfigArgs(global: boolean, ...rest: string[]): string[] {
+  return global ? ["config", "--global", ...rest] : ["config", ...rest];
+}
+
 function configGet(
   runGit: InstallDeps["runGit"],
   key: string,
   global: boolean,
 ): string | null {
-  const args = global ? ["config", "--global", "--get", key] : ["config", "--get", key];
-  const r = runGit(args);
+  const r = runGit(buildConfigArgs(global, "--get", key));
   if (r.status !== 0) return null;
   return r.stdout;
 }
@@ -92,6 +106,13 @@ function configSet(
   value: string,
   global: boolean,
 ): void {
-  const args = global ? ["config", "--global", key, value] : ["config", key, value];
-  runGit(args);
+  runGit(buildConfigArgs(global, key, value));
+}
+
+function configUnset(
+  runGit: InstallDeps["runGit"],
+  key: string,
+  global: boolean,
+): void {
+  runGit(buildConfigArgs(global, "--unset", key));
 }
